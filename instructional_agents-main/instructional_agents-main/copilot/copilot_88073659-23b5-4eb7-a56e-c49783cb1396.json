@@ -1,0 +1,8 @@
+{
+  "learning_objectives": "Students should understand the basic concepts of Machine Learning, its types, common applications, and the difference between supervised, unsupervised, and reinforcement learning.",
+  "syllabus": "Introduction to Machine Learning\n\n1. What is Machine Learning?\n2. Why Machine Learning is needed\n3. Types of Machine Learning\n4. Supervised Learning\n5. Unsupervised Learning\n6. Reinforcement Learning\n7. Real-world applications of Machine Learning\n8. Advantages and limitations of Machine Learning",
+  "slides": "Create clear and student-friendly lecture slides. Explain concepts step by step with simple examples. Avoid excessive text. Include important definitions, comparisons, examples, and diagrams or flowcharts where useful. Keep the slides suitable for a masters student.",
+  "script": "Create a detailed teaching script for every slide. Explain the concept in simple language as if a teacher is explaining it in class. Include examples and transitions between slides. The script should provide enough explanation for a 20 to 25 minute lecture.",
+  "assessment": "Create a short assessment after each chapter with a mixture of MCQs and conceptual questions. Questions should test understanding rather than memorization. Provide the correct answer, explanation, and a helpful hint.",
+  "overall": "Keep the content technically accurate, easy to understand, well structured, and appropriate for M.Tech AI students. Maintain consistency between the slides, teaching script, and assessment. Use practical real-world examples wherever possible."
+}

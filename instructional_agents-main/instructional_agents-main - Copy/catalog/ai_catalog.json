@@ -1,0 +1,54 @@
+{
+  "course_structure": {
+    "course_name": "Artificial Intelligence",
+    "course_level": "B.Tech 3rd Year",
+    "chapters": [
+      "Introduction to AI",
+      "Intelligent Agents",
+      "Search Algorithms",
+      "Knowledge Representation",
+      "Machine Learning Basics",
+      "Deep Learning Basics"
+    ],
+    "course_outcomes": [
+      "Understand AI fundamentals",
+      "Learn search algorithms",
+      "Implement machine learning basics"
+    ]
+  },
+
+  "institutional_requirements": {
+    "credits": 4,
+    "semester": "6th",
+    "program": "B.Tech CSE"
+  },
+
+  "teaching_constraints": {
+    "max_slide_count": 30,
+    "lecture_hours": 45,
+    "lab_hours": 30
+  },
+
+  "student_profile": {
+    "background": "Computer Science Students",
+    "prerequisite": "Python Programming, Data Structures"
+  },
+
+  "prior_feedback": {
+    "common_issues": [
+      "Students need more practical examples",
+      "Students struggle with search algorithms"
+    ]
+  },
+
+  "instructor_preferences": {
+    "teaching_style": "Concept first, then implementation",
+    "examples": "Real-world AI applications"
+  },
+
+  "assessment_design": {
+    "quiz": 20,
+    "assignment": 30,
+    "project": 50
+  }
+}

@@ -1,0 +1,1986 @@
+import os
+import json
+import re
+from typing import List, Dict, Any, Tuple, Optional
+from pathlib import Path
+
+from src.agents import (
+    LLM,
+    Agent,
+)
+
+
+class SlideUtils:
+    """Utility class: provides reusable utility functions for slides"""
+    
+    @staticmethod
+    def get_latex_template(catalog: bool = False, template_path: Optional[str] = None) -> str:
+        """Get LaTeX template"""
+        default_template = r"""
+\documentclass{beamer}
+
+% Theme choice
+\usetheme{Madrid} % You can change to e.g., Warsaw, Berlin, CambridgeUS, etc.
+
+% Encoding and font
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+
+% Graphics and tables
+\usepackage{graphicx}
+\usepackage{booktabs}
+
+% Code listings
+\usepackage{listings}
+\lstset{
+basicstyle=\ttfamily\small,
+keywordstyle=\color{blue},
+commentstyle=\color{gray},
+stringstyle=\color{red},
+breaklines=true,
+frame=single
+}
+
+% Math packages
+\usepackage{amsmath}
+\usepackage{amssymb}
+
+% Colors
+\usepackage{xcolor}
+
+% TikZ and PGFPlots
+\usepackage{tikz}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usetikzlibrary{positioning}
+
+% Hyperlinks
+\usepackage{hyperref}
+
+% Title information
+\title{Sample Beamer Presentation}
+\author{Your Name}
+\institute{Your Institution}
+\date{\today}
+
+\begin{document}
+
+% Title frame
+\begin{frame}[fragile]
+    \titlepage
+\end{frame}
+
+\end{document}
+"""
+        
+        if catalog and template_path:
+            if os.path.exists(template_path):
+                with open(template_path, "r", encoding="utf-8") as f:
+                    return f.read()
+        elif catalog:
+            template_dir = "catalog/references"
+            latex_template_path = os.path.join(template_dir, "latex_template.tex")
+            if os.path.exists(latex_template_path):
+                with open(latex_template_path, "r", encoding="utf-8") as f:
+                    return f.read()
+        
+        return default_template
+    
+    @staticmethod
+    def parse_latex_template(latex_template: str) -> Tuple[str, str]:
+        """Parse LaTeX template, separating prefix and suffix"""
+        begin_doc = latex_template.find("\\begin{document}")
+        end_doc = latex_template.find("\\end{document}")
+        
+        if begin_doc != -1 and end_doc != -1:
+            prefix = latex_template[:begin_doc + len("\\begin{document}")]
+            suffix = latex_template[end_doc:]
+            return prefix, suffix
+        elif begin_doc != -1:
+            prefix = latex_template[:begin_doc + len("\\begin{document}")]
+            suffix = "\n\n\\end{document}"
+            return prefix, suffix
+        else:
+            # Standard structure not found, assume entire template is prefix
+            prefix = latex_template + "\n\n\\begin{document}\n"
+            suffix = "\n\\end{document}"
+            return prefix, suffix
+    
+    @staticmethod
+    def extract_latex_frames(latex_source: str) -> List[str]:
+        """Extract all frames from LaTeX source code"""
+        frame_pattern = re.compile(r'\\begin{frame}.*?\\end{frame}', re.DOTALL)
+        frames = frame_pattern.findall(latex_source)
+        return frames
+    
+    @staticmethod
+    def compile_latex_document(
+        prefix: str,
+        frames: List[str],
+        suffix: str
+    ) -> str:
+        """Compile a complete LaTeX document"""
+        latex_source = prefix + "\n\n" + "\n\n".join(frames) + "\n\n" + suffix
+        
+        # Validate document structure
+        match = re.search(r"\\documentclass.*?\\begin\{document\}.*?\\end\{document\}", latex_source, re.DOTALL)
+        if match:
+            return match.group()
+        else:
+            return latex_source  # Return even if no match, let the caller decide
+    
+    @staticmethod
+    def generate_latex_frame_prompt(
+        title: str,
+        content: str,
+        description: Optional[str] = None,
+        current_frames: Optional[str] = None,
+        user_feedback: Optional[Dict] = None,
+        max_frames: int = 3
+    ) -> str:
+        """Generate prompt for LaTeX frame creation"""
+        feedback_text = ""
+        if user_feedback:
+            feedback_text = f"""
+User Feedback:
+[For slides]{json.dumps(user_feedback.get('slides', {}), indent=2)}
+[For overall]{json.dumps(user_feedback.get('overall', {}), indent=2)}
+"""
+        
+        current_frames_text = ""
+        if current_frames:
+            current_frames_text = f"""
+Current LaTeX Frames (for reference):
+```latex
+{current_frames}
+```
+"""
+        
+        description_text = f"\nSlide Description: {description}" if description else ""
+        
+        return f"""
+Based on the following slide content, generate LaTeX code for a presentation slide.
+You can create multiple frames if the content is too extensive for a single frame.
+
+Slide Title: {title}{description_text}
+
+Detailed Content:
+{content[:2000]}
+
+{current_frames_text}{feedback_text}
+
+Please generate the LaTeX code for this slide using the beamer class format.
+You should first summarize the content and extract key points to A BRIEF SUMMARY.
+
+IMPORTANT: You can create multiple frames for this slide if needed (maximum {max_frames} frames). Consider creating separate frames for:
+- Different concepts or topics
+- Lengthy explanations that won't fit on one slide
+- Examples that need their own space
+- Code snippets or formulas that need more room
+
+Each frame should be structured as follows:
+\\begin{{frame}}[fragile]
+    \\frametitle{{Slide Title - Part X}}
+    % Content goes here
+\\end{{frame}}
+
+Guidelines:
+1. Don't use non-English characters directly, e.g. use $\\gamma$ instead of γ, $\\epsilon$ instead of ε
+2. If any symbol has a special meaning, add a backslash. e.g. use \\& instead of &
+3. Use bullet points or numbered lists for clarity
+4. Keep each frame focused and not overcrowded
+5. If you create multiple frames [***NO MORE THAN {max_frames} FRAMES***], ensure logical flow between them
+
+Use LaTeX features like:
+- \\begin{{itemize}} for bullet points
+- \\begin{{enumerate}} for numbered lists
+- \\begin{{block}}{{Title}} for highlighted blocks
+- \\begin{{lstlisting}} for code snippets
+- \\begin{{equation}} for mathematical formulas
+
+Your response should contain all the frames for this slide, each from \\begin{{frame}}[fragile] to \\end{{frame}}.
+Separate multiple frames with blank lines.
+"""
+    
+    @staticmethod
+    def generate_latex_frames_from_content(
+        agent: Agent,
+        title: str,
+        content: str,
+        description: Optional[str] = None,
+        current_frames: Optional[str] = None,
+        user_feedback: Optional[Dict] = None,
+        max_frames: int = 3
+    ) -> List[str]:
+        """Generate LaTeX frames from content using an Agent"""
+        prompt = SlideUtils.generate_latex_frame_prompt(
+            title=title,
+            content=content,
+            description=description,
+            current_frames=current_frames,
+            user_feedback=user_feedback,
+            max_frames=max_frames
+        )
+        
+        agent.reset_history()
+        response, _, _ = agent.generate_response(
+            prompt=prompt,
+            stream=True,
+            save_to_history=False
+        )
+        
+        frames = SlideUtils.extract_latex_frames(response)
+        return frames
+
+
+class SlidesDeliberation:
+    """
+    SlidesDeliberation class for organizing agents to collaboratively create slides
+    """
+    def __init__(self,
+                 id: str,
+                 name: str,
+                 agents: Dict[str, Agent],
+                 llm: LLM,
+                 max_rounds: int = 1,
+                 output_dir: str = "./outputs/",
+                 catalog: bool = False,
+                 catalog_dict: Dict[str, Any] = None,
+                 resume: bool = False,
+                 ):
+        """
+        Initialize SlidesDeliberation
+
+        Args:
+            id: Unique identifier for this deliberation
+            name: Human-readable name for this deliberation
+            agents: Dictionary of agents with roles as keys
+            llm: LLM instance to use
+            max_rounds: Maximum discussion rounds
+            latex_template: LaTeX template to use for slides
+            output_dir: Directory to save output files
+            resume: If True and a checkpoint exists in output_dir, pick up
+                from the last completed step / slide instead of starting
+                from scratch.
+        """
+        self.id = id
+        self.name = name
+        self.agents = agents
+        self.llm = llm
+        self.max_rounds = max_rounds
+        self.output_dir = output_dir
+        self.catalog = catalog
+        self.catalog_dict = catalog_dict if catalog_dict else {}
+        self.resume = resume
+
+        # Initialize containers for results
+        self.slides_outline = []
+        self.latex_dict = {}  # Now stores list of frames per slide
+        self.slides_script = {}
+        self.assessment_template = {}  # New: assessment template
+        self.assessment_content = {}   # New: assessment content
+
+    # ------------------------------------------------------------------ #
+    # Checkpoint helpers (resume support)                                #
+    # ------------------------------------------------------------------ #
+    CHECKPOINT_FILENAME = "_checkpoint.json"
+
+    def _checkpoint_path(self) -> str:
+        return os.path.join(self.output_dir, self.CHECKPOINT_FILENAME)
+
+    def _save_checkpoint(self, done_steps, last_slide_idx=None):
+        """Persist mid-run state so a crash can be resumed.
+
+        Writes atomically via rename to avoid a truncated checkpoint if the
+        process dies mid-write.
+        """
+        payload = {
+            "version": 1,
+            "done_steps": list(done_steps),
+            "last_slide_idx": last_slide_idx,
+            "slides_outline": self.slides_outline,
+            "latex_dict": {str(k): v for k, v in self.latex_dict.items()},
+            "slides_script": {str(k): v for k, v in self.slides_script.items()},
+            "assessment_template": {
+                str(k): v for k, v in self.assessment_template.items()
+            },
+            "assessment_content": {
+                str(k): v for k, v in self.assessment_content.items()
+            },
+            "latex_prefix": getattr(self, "latex_prefix", ""),
+            "latex_suffix": getattr(self, "latex_suffix", ""),
+            "user_feedback": getattr(self, "user_feedback", {}),
+            "time_slides": self.time_slides,
+            "token_slides": self.token_slides,
+            "time_script": self.time_script,
+            "token_script": self.token_script,
+            "time_assessment": self.time_assessment,
+            "token_assessment": self.token_assessment,
+        }
+        os.makedirs(self.output_dir, exist_ok=True)
+        final_path = self._checkpoint_path()
+        tmp_path = final_path + ".tmp"
+        # Compact separators (no spaces/newlines) — this checkpoint is written
+        # after every slide, so keeping it small matters more than readability.
+        with open(tmp_path, "w") as f:
+            json.dump(payload, f, separators=(",", ":"), default=str)
+        os.replace(tmp_path, final_path)
+
+    def _load_checkpoint(self):
+        """Return the checkpoint dict and hydrate self.* fields; None if absent."""
+        path = self._checkpoint_path()
+        if not os.path.exists(path):
+            return None
+        try:
+            with open(path, "r") as f:
+                ckpt = json.load(f)
+        except Exception as e:
+            print(f"[resume] Failed to load checkpoint at {path}: {e}")
+            return None
+
+        self.slides_outline = ckpt.get("slides_outline", [])
+        self.latex_dict = {
+            int(k): v for k, v in ckpt.get("latex_dict", {}).items()
+        }
+        self.slides_script = {
+            int(k): v for k, v in ckpt.get("slides_script", {}).items()
+        }
+        self.assessment_template = {
+            int(k): v for k, v in ckpt.get("assessment_template", {}).items()
+        }
+        self.assessment_content = {
+            int(k): v for k, v in ckpt.get("assessment_content", {}).items()
+        }
+        self.latex_prefix = ckpt.get("latex_prefix", "")
+        self.latex_suffix = ckpt.get("latex_suffix", "")
+        self.time_slides = ckpt.get("time_slides", 0)
+        self.token_slides = ckpt.get("token_slides", 0)
+        self.time_script = ckpt.get("time_script", 0)
+        self.token_script = ckpt.get("token_script", 0)
+        self.time_assessment = ckpt.get("time_assessment", 0)
+        self.token_assessment = ckpt.get("token_assessment", 0)
+        return ckpt
+
+    def _delete_checkpoint(self):
+        """Remove the checkpoint file after successful completion."""
+        path = self._checkpoint_path()
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+            except OSError as e:
+                print(f"Warning: could not remove checkpoint {path}: {e}")
+    
+   
+    def run(self, chapter: Dict[str, str], user_feedback: Dict[str, Any]):
+        """
+        Run the slides deliberation process
+        
+        Args:
+            chapter: Dictionary containing chapter information
+            context: Dictionary containing context information
+            
+        Returns:
+            Tuple of (latex_source, slides_script_md, assessment_md)
+        """
+        print(f"\n{'='*50}\nStarting Slides Deliberation: {self.name}\n{'='*50}\n")
+        print(f"Chapter: {chapter.get("title", "Untitled Chapter")}\n")
+
+        # ------------------------------------------------------------------ #
+        # Resume: try to load checkpoint first so we hydrate counters from it #
+        # rather than zeroing them out.                                       #
+        # ------------------------------------------------------------------ #
+        done_steps = []
+        ckpt = self._load_checkpoint() if self.resume else None
+        if ckpt is not None:
+            done_steps = list(ckpt.get("done_steps", []))
+            print(f"[resume] Loaded checkpoint from {self._checkpoint_path()} "
+                  f"— completed steps: {done_steps}")
+        else:
+            self.time_slides, self.token_slides = 0, 0
+            self.time_script, self.token_script = 0, 0
+            self.time_assessment, self.token_assessment = 0, 0
+
+        self.user_feedback = user_feedback
+
+        # Step 0: Always re-fetch templates (cheap, deterministic, no LLM)
+        self._get_templates()
+
+        # Step 1: Generate slides outline
+        if "outline" not in done_steps:
+            self._generate_slides_outline(chapter)
+            done_steps.append("outline")
+            self._save_checkpoint(done_steps)
+        else:
+            print("[resume] Skipped step 1 (slides outline)")
+
+        # Step 2: Generate initial LaTeX template
+        if "initial_latex" not in done_steps:
+            self._generate_initial_latex(chapter)
+            done_steps.append("initial_latex")
+            self._save_checkpoint(done_steps)
+        else:
+            print("[resume] Skipped step 2 (initial LaTeX)")
+
+        # Step 3: Generate slides script template
+        if "script_template" not in done_steps:
+            self._generate_slides_script_template()
+            done_steps.append("script_template")
+            self._save_checkpoint(done_steps)
+        else:
+            print("[resume] Skipped step 3 (script template)")
+
+        # Step 4: Generate assessment template
+        if "assessment_template" not in done_steps:
+            self._generate_assessment_template(chapter)
+            done_steps.append("assessment_template")
+            self._save_checkpoint(done_steps)
+        else:
+            print("[resume] Skipped step 4 (assessment template)")
+
+        # Step 5: For each slide, generate content, LaTeX, script, and assessment.
+        # A slide is considered fully generated when assessment_content has an
+        # entry for it (last sub-step 5.4 writes it).
+        for slide_idx, slide in enumerate(self.slides_outline):
+            if slide_idx in self.assessment_content:
+                print(f"[resume] Skipped slide {slide_idx + 1}/{len(self.slides_outline)}: "
+                      f"{slide.get('title', '')} — already generated")
+                continue
+
+            print(f"\n{'-'*50}\nProcessing Slide {slide_idx + 1}/{len(self.slides_outline)}: {slide.get("title", f"Slide {slide_idx + 1}")}\n{'-'*50}\n")
+
+            # Get context window (current slide plus adjacent slides for context)
+            context_slides = self._get_context_slides(slide_idx)
+
+            # Step 5.1: Generate slide draft content
+            slide_draft = self._generate_slide_draft(slide, context_slides, chapter)
+
+            # Step 5.2: Generate slide LaTeX code (potentially multiple frames)
+            self._generate_slide_latex(slide_idx, slide, slide_draft)
+
+            # Step 5.3: Generate slide script
+            self._generate_slide_script(slide_idx, slide, slide_draft)
+
+            # Step 5.4: Generate slide assessment
+            self._generate_slide_assessment(slide_idx, slide, slide_draft)
+
+            # Checkpoint after every completed slide
+            self._save_checkpoint(done_steps, last_slide_idx=slide_idx)
+        
+        # Step 6: Compile final LaTeX source
+        latex_source = self._compile_latex_source()
+        
+        # Step 7: Compile final slides script
+        slides_script_md = self._compile_slides_script()
+        
+        # Step 8: Compile final assessment
+        assessment_md = self._compile_assessment()
+        
+        # Save the results
+        latex_path = os.path.join(self.output_dir, f"slides.tex")
+        script_path = os.path.join(self.output_dir, f"script.md")
+        assessment_path = os.path.join(self.output_dir, f"assessment.md")
+
+        os.makedirs(self.output_dir, exist_ok=True)
+        with open(latex_path, "w", encoding="utf-8") as f:
+            f.write(latex_source)
+
+        with open(script_path, "w", encoding="utf-8") as f:
+            f.write(slides_script_md)
+
+        with open(assessment_path, "w", encoding="utf-8") as f:
+            f.write(assessment_md)
+        
+        print(f"\n{'='*50}\nSlides Deliberation Complete\n{'='*50}\n")
+        print(f"LaTeX slides saved to: {latex_path}")
+        print(f"Slides script saved to: {script_path}")
+        print(f"Assessment saved to: {assessment_path}")
+
+        with open(os.path.join(self.output_dir, "statistics_{}.json").format(self.id), "w") as f:
+            json.dump({
+                "time_slides": self.time_slides,
+                "token_slides": self.token_slides,
+                "time_script": self.time_script,
+                "token_script": self.token_script,
+                "time_assessment": self.time_assessment,
+                "token_assessment": self.token_assessment
+            }, f, indent=2)
+
+        # Chapter finished successfully — clean up the resume checkpoint.
+        self._delete_checkpoint()
+
+    def _get_templates(self):
+        """Get LaTeX template"""
+        self.latex_template = SlideUtils.get_latex_template(
+            catalog=self.catalog
+        )
+    
+    @staticmethod
+    def _extract_json(text: str) -> Any:
+        """Robustly extract a JSON object/array from an LLM response."""
+        if text is None:
+            raise ValueError("Empty LLM response.")
+
+        cleaned = str(text).strip()
+        if not cleaned:
+            raise ValueError("Empty LLM response.")
+
+        cleaned = re.sub(r"```(?:json)?", "", cleaned, flags=re.IGNORECASE)
+        cleaned = cleaned.replace("```", "").strip()
+
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            pass
+
+        candidates = []
+        a, b = cleaned.find("["), cleaned.rfind("]")
+        if a != -1 and b > a:
+            candidates.append(cleaned[a:b + 1])
+
+        a, b = cleaned.find("{"), cleaned.rfind("}")
+        if a != -1 and b > a:
+            candidates.append(cleaned[a:b + 1])
+
+        for candidate in sorted(candidates, key=len, reverse=True):
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+
+        raise ValueError(
+            "No valid JSON found in LLM response: "
+            + cleaned[:1000]
+        )
+
+    def _generate_slides_outline(self, chapter: Dict[str, str]):
+        """Generate, parse, and normalize a safe slide outline."""
+        instructional_designer = self.agents.get("instructional_designer")
+        if not instructional_designer:
+            raise ValueError("Instructional Designer agent not found")
+
+        chapter_title = chapter.get("title", "Untitled Chapter")
+        chapter_description = chapter.get("description", "")
+
+        target_slides = max(
+            3,
+            int(self.catalog_dict.get("slides_length", 12) / 3)
+        )
+
+        prompt = f"""
+Based on the following chapter information, create a detailed slide outline.
+
+Chapter Title: {chapter_title}
+Chapter Description: {chapter_description}
+
+User Feedback:
+{json.dumps(self.user_feedback, indent=2)}
+
+Generate about {target_slides} slides covering the important concepts.
+
+Return ONLY valid JSON in this exact general structure:
+[
+  {{
+    "slide_id": 1,
+    "title": "Introduction to Topic",
+    "description": "Brief overview of the main topic"
+  }}
+]
+
+Every item should contain a meaningful title and description.
+Do not add markdown or explanatory text outside the JSON.
+"""
+
+        instructional_designer.reset_history()
+        print("Generating slides outline...")
+
+        response, elapsed_time, token_usage = (
+            instructional_designer.generate_response(
+                prompt=prompt,
+                stream=True,
+                save_to_history=False
+            )
+        )
+
+        self.time_slides += elapsed_time
+        self.token_slides += token_usage
+
+        try:
+            data = self._extract_json(response)
+
+            if isinstance(data, dict):
+                for key in ("slides", "outline", "slides_outline"):
+                    if isinstance(data.get(key), list):
+                        data = data[key]
+                        break
+
+            if not isinstance(data, list) or not data:
+                raise ValueError("Slide outline is not a non-empty list.")
+
+            normalized = []
+
+            for idx, item in enumerate(data):
+                if not isinstance(item, dict):
+                    continue
+
+                title = str(item.get("title") or "").strip()
+
+                if not title:
+                    title = f"Slide {idx + 1}"
+
+                description = str(
+                    item.get("description")
+                    or item.get("content")
+                    or f"Overview of {title}"
+                ).strip()
+
+                normalized.append({
+                    "slide_id": idx + 1,
+                    "title": title,
+                    "description": description
+                })
+
+            if not normalized:
+                raise ValueError("No valid slides were produced.")
+
+            self.slides_outline = normalized
+
+            print(
+                f"Successfully generated outline with "
+                f"{len(self.slides_outline)} slides"
+            )
+
+        except Exception as e:
+            print(
+                f"Error parsing slide outline: {e}"
+            )
+            print("Response:", response)
+
+            self.slides_outline = [
+                {
+                    "slide_id": 1,
+                    "title": "Introduction",
+                    "description": f"Introduction to {chapter_title}"
+                },
+                {
+                    "slide_id": 2,
+                    "title": "Key Concepts",
+                    "description": "Important concepts from this chapter"
+                },
+                {
+                    "slide_id": 3,
+                    "title": "Conclusion",
+                    "description": "Summary and key takeaways"
+                }
+            ]
+
+    def _generate_initial_latex(self, chapter: Dict[str, str]):
+        """Generate initial LaTeX template using Teaching Assistant agent"""
+        teaching_assistant = self.agents.get("teaching_assistant")
+        if not teaching_assistant:
+            raise ValueError("Teaching Assistant agent not found")
+        
+        # Create the prompt for the agent
+        prompt = f"""
+        Based on the following slides outline and LaTeX template, generate initial LaTeX code for a presentation.
+        
+        Chapter Title: {chapter.get("title", "Untitled Chapter")}
+        
+        Slides Outline:
+        {json.dumps(self.slides_outline, indent=2)}
+
+        User Feedback:
+        [For slides]{json.dumps(self.user_feedback.get("slides", {}), indent=2)}
+        [For overall]{json.dumps(self.user_feedback.get("overall", {}), indent=2)}
+
+        LaTeX Template:
+        ```latex
+        {self.latex_template}
+        ```
+        
+        Please generate the initial LaTeX code with frame placeholders for each slide in the outline.
+        Each slide can have one or more frames based on content complexity.
+        
+        Example of frame structures:
+        \\begin{{frame}}[fragile]
+            \\frametitle{{Slide Title - Part 1}}
+            % Content will be added here
+        \\end{{frame}}
+        
+        \\begin{{frame}}[fragile]
+            \\frametitle{{Slide Title - Part 2}}
+            % Content will be added here
+        \\end{{frame}}
+
+        1. Don't use non-English characters directly, e.g. use $\gamma$ instead of γ, $\epsilon$ instead of ε
+        2. If any of symbols has a special meaning, add a slash. e.g. use \& instead of &
+
+        Your response should be LaTeX code that can be compiled directly.
+        """
+        
+        # Reset agent history to ensure clean context
+        teaching_assistant.reset_history()
+        
+        # Get the response from the agent
+        print("Generating initial LaTeX template...")
+        response, elapsed_time, token_usage = teaching_assistant.generate_response(
+            prompt=prompt,
+            stream=True,
+            save_to_history=False
+        )
+        self.time_slides += elapsed_time
+        self.token_slides += token_usage
+        
+        # Store the full LaTeX source
+        self.full_latex_source = response
+        
+        # Parse frames to build the LaTeX dictionary
+        self._parse_latex_frames(response)
+        
+        print(f"Successfully generated initial LaTeX template")
+    
+    def _parse_latex_frames(self, latex_source: str):
+        """Parse LaTeX frames into a dictionary, grouping by slide"""
+        # Find all frames with their content
+        frame_pattern = re.compile(r'\\begin{frame}(.*?)\\end{frame}', re.DOTALL)
+        frametitle_pattern = re.compile(r'\\frametitle{(.*?)}', re.DOTALL)
+        
+        matches = frame_pattern.finditer(latex_source)
+        
+        self.latex_dict = {}
+        current_slide_idx = 0
+        
+        for i, match in enumerate(matches):
+            frame_content = match.group(1)
+            title_match = frametitle_pattern.search(frame_content)
+            
+            title = title_match.group(1).strip() if title_match else f"Frame {i+1}"
+            
+            # Initialize slide entry if it doesn't exist
+            if current_slide_idx not in self.latex_dict:
+                self.latex_dict[current_slide_idx] = {
+                    "frames": [],
+                    "slide_title": title.split(" - ")[0] if " - " in title else title
+                }
+            
+            # Add frame to current slide
+            self.latex_dict[current_slide_idx]["frames"].append({
+                "full_frame": match.group(0),
+                "content": frame_content.strip(),
+                "title": title,
+                "frame_index": len(self.latex_dict[current_slide_idx]["frames"])
+            })
+            
+            # Simple heuristic: if we have processed enough frames for expected slides
+            if len(self.latex_dict[current_slide_idx]["frames"]) >= 1 and current_slide_idx < len(self.slides_outline) - 1:
+                # Check if next frame title suggests a new slide
+                next_match = None
+                for next_match in frame_pattern.finditer(latex_source):
+                    if next_match.start() > match.end():
+                        break
+                
+                if next_match:
+                    next_content = next_match.group(1)
+                    next_title_match = frametitle_pattern.search(next_content)
+                    next_title = next_title_match.group(1).strip() if next_title_match else ""
+                    
+                    # If title doesn't contain current slide title, it's likely a new slide
+                    current_base_title = self.latex_dict[current_slide_idx]["slide_title"]
+                    if current_base_title not in next_title and not next_title.startswith(current_base_title):
+                        current_slide_idx += 1
+        
+        # Store the parts before and after the frames
+        all_frames = ''.join([
+            frame["full_frame"] 
+            for slide_data in self.latex_dict.values() 
+            for frame in slide_data["frames"]
+        ])
+        parts = latex_source.split(all_frames)
+        
+        if len(parts) >= 2:
+            self.latex_prefix = parts[0]
+            self.latex_suffix = parts[1]
+        else:
+            # Fallback if splitting didn't work as expected
+            self.latex_prefix = latex_source.split('\\begin{document}')[0] + '\\begin{document}\n\n\\frame{\\titlepage}\n\n'
+            self.latex_suffix = '\n\\end{document}'
+    
+    def _generate_slides_script_template(self):
+        """Generate slides script template using Teaching Assistant agent.
+
+        The LLM may occasionally omit slide_id or return incomplete entries.
+        This method normalizes the response using the position in slides_outline
+        as the reliable source of slide numbering.
+        """
+        teaching_assistant = self.agents.get("teaching_assistant")
+        if not teaching_assistant:
+            raise ValueError("Teaching Assistant agent not found")
+
+        # Create a simple script template example
+        script_template = """[
+            {
+                "slide_id": 1,
+                "title": "Introduction to Topic",
+                "script": "Welcome to today's lecture on this topic. We're going to cover..."
+            },
+            {
+                "slide_id": 2,
+                "title": "Key Concepts",
+                "script": "The key concepts we need to understand are..."
+            }
+        ]"""
+
+        # Create the prompt for the agent
+        prompt = f"""
+        Based on the following slides outline, create a template for slides
+        scripts in JSON format.
+
+        Slides Outline:
+        {json.dumps(self.slides_outline, indent=2)}
+
+        User Feedback:
+        [For script]{json.dumps(self.user_feedback.get("script", {}), indent=2)}
+        [For overall]{json.dumps(self.user_feedback.get("overall", {}), indent=2)}
+
+        Please generate a script template with placeholders for EACH slide
+        in the outline.
+
+        The template should be in JSON format with the following structure:
+
+        {script_template}
+
+        IMPORTANT:
+        - Return exactly one JSON array.
+        - Return one object for each slide.
+        - Each object should contain:
+            "slide_id"
+            "title"
+            "script"
+        - slide_id should start at 1 and follow the slide order.
+        - Do not add markdown fences.
+        - Do not add explanations outside the JSON.
+        - The response must be valid JSON.
+
+        Each script entry should include a brief placeholder description
+        of what would be said when presenting that slide.
+        """
+
+        # Reset agent history to ensure clean context
+        teaching_assistant.reset_history()
+
+        # Get the response from the agent
+        print("Generating slides script template...")
+
+        response, elapsed_time, token_usage = teaching_assistant.generate_response(
+            prompt=prompt,
+            stream=True,
+            save_to_history=False
+        )
+
+        self.time_script += elapsed_time
+        self.token_script += token_usage
+
+        # ---------------------------------------------------------------
+        # Parse and normalize the JSON response
+        # ---------------------------------------------------------------
+
+        try:
+            script_list = None
+
+            # Try to extract JSON array from response
+            json_match = re.search(
+                r'\[\s*\{.*\}\s*\]',
+                response,
+                re.DOTALL
+            )
+
+            if json_match:
+                json_str = json_match.group(0)
+                script_list = json.loads(json_str)
+            else:
+                # Try direct JSON parsing
+                script_list = json.loads(response)
+
+            if not isinstance(script_list, list):
+                raise ValueError(
+                    "Slides script response is not a JSON list."
+                )
+
+            normalized_scripts = {}
+
+            # -----------------------------------------------------------
+            # Normalize every LLM-generated item
+            # -----------------------------------------------------------
+
+            for i, item in enumerate(script_list):
+
+                if not isinstance(item, dict):
+                    print(
+                        f"Warning: Ignoring invalid script entry at index {i}"
+                    )
+                    continue
+
+                # IMPORTANT:
+                # Do NOT depend exclusively on item["slide_id"].
+                #
+                # The model sometimes omits slide_id.
+                # The position in slides_outline is more reliable.
+                slide_idx = i
+
+                # If this entry is outside the actual outline,
+                # ignore it.
+                if slide_idx >= len(self.slides_outline):
+                    print(
+                        f"Warning: Ignoring extra script entry at index {i}"
+                    )
+                    continue
+
+                outline_slide = self.slides_outline[slide_idx]
+
+                # Always use our own slide number.
+                slide_id = slide_idx + 1
+
+                # Get title from model if available.
+                title = item.get("title")
+
+                # If title is missing, use the outline title.
+                if not title:
+                    title = outline_slide.get(
+                        "title",
+                        f"Slide {slide_id}"
+                    )
+
+                # Get script from model.
+                script = item.get("script")
+
+                # If script is missing, create a safe placeholder.
+                if not script:
+                    script = (
+                        f"Placeholder script for {title}"
+                    )
+
+                # Store normalized entry.
+                normalized_scripts[slide_idx] = {
+                    "slide_id": slide_id,
+                    "title": title,
+                    "script": script
+                }
+
+            # -----------------------------------------------------------
+            # Make sure EVERY slide has a script entry.
+            # -----------------------------------------------------------
+
+            for i, slide in enumerate(self.slides_outline):
+
+                if i not in normalized_scripts:
+
+                    slide_id = i + 1
+                    title = slide.get(
+                        "title",
+                        f"Slide {slide_id}"
+                    )
+
+                    normalized_scripts[i] = {
+                        "slide_id": slide_id,
+                        "title": title,
+                        "script": (
+                            f"Placeholder script for {title}"
+                        )
+                    }
+
+            # Keep dictionary ordered according to slide order.
+            self.slides_script = {
+                i: normalized_scripts[i]
+                for i in range(len(self.slides_outline))
+            }
+
+            print(
+                f"Successfully generated script template for "
+                f"{len(self.slides_script)} slides"
+            )
+
+        except (
+            json.JSONDecodeError,
+            ValueError,
+            TypeError
+        ) as e:
+
+            print(
+                f"Error: Could not parse JSON response from agent: {e}"
+            )
+
+            print("Response:")
+            print(response)
+
+            # -----------------------------------------------------------
+            # Complete fallback
+            # -----------------------------------------------------------
+
+            self.slides_script = {}
+
+            for i, slide in enumerate(self.slides_outline):
+
+                slide_id = i + 1
+                title = slide.get(
+                    "title",
+                    f"Slide {slide_id}"
+                )
+
+                self.slides_script[i] = {
+                    "slide_id": slide_id,
+                    "title": title,
+                    "script": (
+                        f"Placeholder script for {title}"
+                    )
+                }
+
+            print(
+                f"Using fallback script template for "
+                f"{len(self.slides_script)} slides"
+            )
+    def _generate_assessment_template(self, chapter: Dict[str, str]):
+        """Generate assessment template using Teaching Assistant agent.
+
+        The LLM may occasionally omit slide_id or return incomplete entries.
+        This method normalizes the response using the position in slides_outline
+        as the reliable source of slide numbering.
+        """
+        teaching_assistant = self.agents.get("teaching_assistant")
+        if not teaching_assistant:
+            raise ValueError("Teaching Assistant agent not found")
+
+        # Create a simple assessment template example
+        assessment_template = """[
+            {
+                "slide_id": 1,
+                "title": "Introduction to Topic",
+                "assessment": {
+                    "questions": [
+                        {
+                            "type": "multiple_choice",
+                            "question": "Sample question about the topic?",
+                            "options": [
+                                "A) Option 1",
+                                "B) Option 2",
+                                "C) Option 3",
+                                "D) Option 4"
+                            ],
+                            "correct_answer": "A",
+                            "explanation": "Explanation of why this is correct"
+                        }
+                    ],
+                    "activities": [
+                        "Activity description"
+                    ],
+                    "learning_objectives": [
+                        "Learning objective 1",
+                        "Learning objective 2"
+                    ]
+                }
+            }
+        ]"""
+
+        # Create the prompt for the agent
+        prompt = f"""
+        Based on the following chapter information and slides outline,
+        create an assessment template in JSON format.
+
+        Chapter Title:
+        {chapter.get("title", "Untitled Chapter")}
+
+        Chapter Description:
+        {chapter.get("description", "")}
+
+        Slides Outline:
+        {json.dumps(self.slides_outline, indent=2)}
+
+        User Feedback:
+        [For assessment]
+        {json.dumps(self.user_feedback.get("assessment", {}), indent=2)}
+
+        [For overall]
+        {json.dumps(self.user_feedback.get("overall", {}), indent=2)}
+
+        Please generate an assessment template with placeholders for
+        EACH slide in the outline.
+
+        The template should include:
+        - Questions
+        - Activities
+        - Learning objectives
+
+        The template should be in JSON format with the following structure:
+
+        {assessment_template}
+
+        Assessments should meet the following requirements:
+        {self.catalog_dict['assessment_planning']}
+
+        Each assessment entry should include:
+
+        1. Multiple choice questions with options and correct answers
+        2. Practical activities or exercises
+        3. Learning objectives for the slide
+
+        IMPORTANT:
+        - Return exactly one JSON array.
+        - Return one object for each slide.
+        - Each object should contain:
+            "slide_id"
+            "title"
+            "assessment"
+        - slide_id should start at 1 and follow the slide order.
+        - Do not add markdown fences.
+        - Do not add explanations outside the JSON.
+        - The response must be valid JSON.
+
+        Your response must be valid JSON that can be parsed programmatically.
+        """
+
+        # Reset agent history to ensure clean context
+        teaching_assistant.reset_history()
+
+        # Get the response from the agent
+        print("Generating assessment template...")
+
+        response, elapsed_time, token_usage = teaching_assistant.generate_response(
+            prompt=prompt,
+            stream=True,
+            save_to_history=False
+        )
+
+        self.time_assessment += elapsed_time
+        self.token_assessment += token_usage
+
+        # ---------------------------------------------------------------
+        # Parse and normalize JSON response
+        # ---------------------------------------------------------------
+
+        try:
+            assessment_list = None
+
+            # Try to extract JSON array from response
+            json_match = re.search(
+                r'\[\s*\{.*\}\s*\]',
+                response,
+                re.DOTALL
+            )
+
+            if json_match:
+                json_str = json_match.group(0)
+                assessment_list = json.loads(json_str)
+            else:
+                # Try direct JSON parsing
+                assessment_list = json.loads(response)
+
+            if not isinstance(assessment_list, list):
+                raise ValueError(
+                    "Assessment template response is not a JSON list."
+                )
+
+            normalized_assessments = {}
+
+            # -----------------------------------------------------------
+            # Normalize every LLM-generated item
+            # -----------------------------------------------------------
+
+            for i, item in enumerate(assessment_list):
+
+                if not isinstance(item, dict):
+                    print(
+                        f"Warning: Ignoring invalid assessment entry "
+                        f"at index {i}"
+                    )
+                    continue
+
+                # Use position rather than trusting model slide_id.
+                slide_idx = i
+
+                # Ignore extra entries beyond actual slides.
+                if slide_idx >= len(self.slides_outline):
+                    print(
+                        f"Warning: Ignoring extra assessment entry "
+                        f"at index {i}"
+                    )
+                    continue
+
+                outline_slide = self.slides_outline[slide_idx]
+
+                slide_id = slide_idx + 1
+
+                # Title
+                title = item.get("title")
+
+                if not title:
+                    title = outline_slide.get(
+                        "title",
+                        f"Slide {slide_id}"
+                    )
+
+                # Assessment object
+                assessment = item.get("assessment")
+
+                if not isinstance(assessment, dict):
+                    assessment = {}
+
+                # Make sure expected assessment fields exist.
+                questions = assessment.get("questions", [])
+                activities = assessment.get("activities", [])
+                learning_objectives = assessment.get(
+                    "learning_objectives",
+                    []
+                )
+
+                if not isinstance(questions, list):
+                    questions = []
+
+                if not isinstance(activities, list):
+                    activities = []
+
+                if not isinstance(learning_objectives, list):
+                    learning_objectives = []
+
+                # Normalize assessment entry.
+                normalized_assessments[slide_idx] = {
+                    "slide_id": slide_id,
+                    "title": title,
+                    "assessment": {
+                        "questions": questions,
+                        "activities": activities,
+                        "learning_objectives": learning_objectives
+                    }
+                }
+
+            # -----------------------------------------------------------
+            # Make sure EVERY slide has an assessment template.
+            # -----------------------------------------------------------
+
+            for i, slide in enumerate(self.slides_outline):
+
+                if i not in normalized_assessments:
+
+                    slide_id = i + 1
+
+                    title = slide.get(
+                        "title",
+                        f"Slide {slide_id}"
+                    )
+
+                    normalized_assessments[i] = {
+                        "slide_id": slide_id,
+                        "title": title,
+                        "assessment": {
+                            "questions": [],
+                            "activities": [],
+                            "learning_objectives": []
+                        }
+                    }
+
+            # Keep dictionary ordered according to slide order.
+            self.assessment_template = {
+                i: normalized_assessments[i]
+                for i in range(len(self.slides_outline))
+            }
+
+            print(
+                f"Successfully generated assessment template for "
+                f"{len(self.assessment_template)} slides"
+            )
+
+        except (
+            json.JSONDecodeError,
+            ValueError,
+            TypeError
+        ) as e:
+
+            print(
+                f"Error: Could not parse JSON response from agent: {e}"
+            )
+
+            print("Response:")
+            print(response)
+
+            # -----------------------------------------------------------
+            # Complete fallback
+            # -----------------------------------------------------------
+
+            self.assessment_template = {}
+
+            for i, slide in enumerate(self.slides_outline):
+
+                slide_id = i + 1
+
+                title = slide.get(
+                    "title",
+                    f"Slide {slide_id}"
+                )
+
+                self.assessment_template[i] = {
+                    "slide_id": slide_id,
+                    "title": title,
+                    "assessment": {
+                        "questions": [],
+                        "activities": [],
+                        "learning_objectives": []
+                    }
+                }
+
+            print(
+                f"Using fallback assessment template for "
+                f"{len(self.assessment_template)} slides"
+            )
+        
+    def _get_context_slides(self, current_idx: int, context_size: int = 1):
+        """Get adjacent slides for context"""
+        context_slides = []
+        
+        # Add previous slides if available
+        start_idx = max(0, current_idx - context_size)
+        for i in range(start_idx, current_idx):
+            context_slides.append({
+                "position": "previous",
+                "slide_id": i+1,
+                "info": self.slides_outline[i]
+            })
+        
+        # Add current slide
+        context_slides.append({
+            "position": "current",
+            "slide_id": current_idx+1,
+            "info": self.slides_outline[current_idx]
+        })
+        
+        # Add next slides if available
+        end_idx = min(len(self.slides_outline), current_idx + context_size + 1)
+        for i in range(current_idx + 1, end_idx):
+            context_slides.append({
+                "position": "next",
+                "slide_id": i+1,
+                "info": self.slides_outline[i]
+            })
+        
+        return context_slides
+    
+    def _generate_slide_draft(self, slide: Dict[str, str], context_slides: List[Dict[str, Any]], chapter: Dict[str, str]):
+        """Generate detailed slide draft using Teaching Faculty agent"""
+        teaching_faculty = self.agents.get("teaching_faculty")
+        if not teaching_faculty:
+            raise ValueError("Teaching Faculty agent not found")
+        
+        # Create the prompt for the agent
+        prompt = f"""
+        Please create detailed educational content for the following slide:
+        
+        Chapter: {chapter.get("title", "Untitled Chapter")}
+        Slide: {slide.get("title", "Untitled Slide")}
+        Description: {slide.get("description", "")}
+        
+        Context (adjacent slides for reference):
+        {json.dumps(context_slides, indent=2)}
+
+        User Feedback:
+        [For slides]{json.dumps(self.user_feedback.get("slides", {}), indent=2)}
+        [For overall]{json.dumps(self.user_feedback.get("overall", {}), indent=2)}
+        
+        Please generate comprehensive, detailed, and easy-to-understand educational content for this slide.
+        Your content should include:
+        1. Clear explanations of concepts
+        2. Examples or illustrations where appropriate
+        3. Key points to emphasize
+        4. Any formulas, code snippets, or diagrams that would be helpful, but dont try to include any pictures in the LaTeX code.
+        
+        Focus on making the content educational, engaging, and aligned with the chapter's learning objectives.
+        Note: Your output length needs to be kept within a reasonable range so that it can fit on a single PPT slide.
+        """
+        
+        # Reset agent history to ensure clean context
+        teaching_faculty.reset_history()
+        
+        # Get the response from the agent
+        print(f"Generating detailed content for slide: {slide.get("title", 'Untitled Slide')}...")
+        response, elapsed_time, token_usage = teaching_faculty.generate_response(
+            prompt=prompt,
+            stream=True,
+            save_to_history=False
+        )
+        self.time_slides += elapsed_time
+        self.token_slides += token_usage
+        
+        return response
+    
+    def _generate_slide_latex(self, slide_idx: int, slide: Dict[str, str], slide_draft: str):
+        """Generate LaTeX code for a slide using Teaching Assistant agent - can generate multiple frames"""
+        teaching_assistant = self.agents.get("teaching_assistant")
+        if not teaching_assistant:
+            raise ValueError("Teaching Assistant agent not found")
+        
+        # Get the current LaTeX frames if they exist
+        current_frames = self.latex_dict.get(slide_idx, {}).get("frames", [])
+        current_frames_text = "\n\n".join([frame["full_frame"] for frame in current_frames]) if current_frames else None
+        
+        # Use utility function to generate prompt
+        prompt = SlideUtils.generate_latex_frame_prompt(
+            title=slide.get("title", f"Slide {slide_idx + 1}"),
+            content=slide_draft,
+            description=slide.get('description'),
+            current_frames=current_frames_text,
+            user_feedback=self.user_feedback,
+            max_frames=3
+        )
+        
+        # Reset agent history to ensure clean context
+        teaching_assistant.reset_history()
+        
+        # Get the response from the agent
+        print(f"Generating LaTeX code for slide: {slide.get("title", f"Slide {slide_idx + 1}")}...")
+        response, elapsed_time, token_usage = teaching_assistant.generate_response(
+            prompt=prompt,
+            stream=True,
+            save_to_history=False
+        )
+        self.time_slides += elapsed_time
+        self.token_slides += token_usage
+        
+        # Use utility function to extract frames
+        frame_matches = SlideUtils.extract_latex_frames(response)
+        
+        if frame_matches:
+            # Initialize slide entry if it doesn't exist
+            if slide_idx not in self.latex_dict:
+                self.latex_dict[slide_idx] = {
+                    "frames": [],
+                    "slide_title": slide.get("title", f"Slide {slide_idx + 1}")
+                }
+            else:
+                # Clear existing frames for this slide
+                self.latex_dict[slide_idx]["frames"] = []
+                self.latex_dict[slide_idx]["slide_title"] = slide.get("title", f"Slide {slide_idx + 1}")
+            
+            # Add all frames for this slide
+            for i, frame_code in enumerate(frame_matches):
+                self.latex_dict[slide_idx]["frames"].append({
+                    "full_frame": frame_code,
+                    "content": frame_code.replace("\\begin{frame}", "").replace("\\end{frame}", "").strip(),
+                    "title": slide.get("title", f"Slide {slide_idx + 1}") + (f" - Part {i+1}" if len(frame_matches) > 1 else ""),
+                    "frame_index": i
+                })
+            
+            print(f"Generated {len(frame_matches)} frame(s) for slide: {slide.get("title", f"Slide {slide_idx + 1}")}")
+        else:
+            # Fallback if no frames were found
+            fallback_frame = f"""\\begin{{frame}}[fragile]
+                \\frametitle{{{slide.get("title", f"Slide {slide_idx + 1}")}}}
+                {slide.get('description', '')}
+            \\end{{frame}}"""
+            
+            self.latex_dict[slide_idx] = {
+                "frames": [{
+                    "full_frame": fallback_frame,
+                    "content": fallback_frame.replace("\\begin{frame}", "").replace("\\end{frame}", "").strip(),
+                    "title": slide.get("title", f"Slide {slide_idx + 1}"),
+                    "frame_index": 0
+                }],
+                "slide_title": slide.get("title", f"Slide {slide_idx + 1}")
+            }
+            print(f"Generated fallback frame for slide: {slide.get("title", f"Slide {slide_idx + 1}")}")
+    
+    def _generate_slide_script(self, slide_idx: int, slide: Dict[str, str], slide_draft: str):
+        """Generate script for a slide using Teaching Assistant agent"""
+        teaching_assistant = self.agents.get("teaching_assistant")
+        if not teaching_assistant:
+            raise ValueError("Teaching Assistant agent not found")
+        
+        # Get adjacent slide scripts for context
+        prev_script = self.slides_script.get(slide_idx-1, {}).get("script", "") if slide_idx > 0 else ""
+        current_script = self.slides_script.get(slide_idx, {}).get("script", "")
+        next_script = self.slides_script.get(slide_idx, {}).get("script", "") if slide_idx < len(self.slides_outline)-1 else ""
+        
+        # Get all frames for this slide
+        frames_info = ""
+        if slide_idx in self.latex_dict:
+            for i, frame in enumerate(self.latex_dict[slide_idx]["frames"]):
+                frames_info += f"Frame {i+1}:\n```latex\n{frame['full_frame']}\n```\n\n"
+        
+        # Create the prompt for the agent
+        prompt = f"""
+        Based on the following slide content, generate a detailed speaking script for presenting this slide.
+        Note: This slide may have multiple frames, so your script should cover all frames smoothly.
+        
+        Slide Title: {slide.get("title", f"Slide {slide_idx + 1}")}
+        Slide Description: {slide.get("description", "")}
+        
+        Detailed Content:
+        {slide_draft}
+        
+        LaTeX Frames for this slide:
+        {frames_info}
+        
+        Context (adjacent slides' scripts for smooth transitions):
+        Previous slide script: {prev_script[:200] + "..." if len(prev_script) > 200 else prev_script}
+        Current placeholder: {current_script}
+        Next slide script: {next_script[:200] + "..." if len(next_script) > 200 else next_script}
+
+        User Feedback:
+        [For script]{json.dumps(self.user_feedback.get("script", {}), indent=2)}
+        [For overall]{json.dumps(self.user_feedback.get("overall", {}), indent=2)}
+        
+        Please generate a comprehensive speaking script for this slide that:
+        1. Introduces the slide topic
+        2. Explains all key points clearly and thoroughly
+        3. If multiple frames exist, provides smooth transitions between frames
+        4. Provides relevant examples or analogies
+        5. Connects to previous or upcoming content
+        6. Includes rhetorical questions or engagement points for students
+        
+        The script should be detailed enough for someone else to present effectively from it.
+        If there are multiple frames, clearly indicate when to advance to the next frame.
+        """
+        
+        # Reset agent history to ensure clean context
+        teaching_assistant.reset_history()
+        
+        # Get the response from the agent
+        print(f"Generating speaking script for slide: {slide.get("title", f"Slide {slide_idx + 1}")}...")
+        response, elapsed_time, token_usage = teaching_assistant.generate_response(
+            prompt=prompt,
+            stream=True,
+            save_to_history=False
+        )
+        self.time_script += elapsed_time
+        self.token_script += token_usage
+        
+        # Update the slides script dictionary
+        self.slides_script[slide_idx] = {
+            "slide_id": slide_idx + 1,
+            "title": slide.get("title", f"Slide {slide_idx + 1}"),
+            "script": response,
+            "frame_count": len(self.latex_dict.get(slide_idx, {}).get("frames", []))
+        }
+    
+    def _generate_slide_assessment(
+        self,
+        slide_idx: int,
+        slide: Dict[str, str],
+        slide_draft: str
+    ):
+        """Generate and normalize assessment for one slide."""
+        teaching_assistant = self.agents.get("teaching_assistant")
+        if not teaching_assistant:
+            raise ValueError("Teaching Assistant agent not found")
+
+        slide_id = slide_idx + 1
+        title = str(
+            slide.get("title") or f"Slide {slide_id}"
+        )
+        description = str(
+            slide.get("description") or ""
+        )
+
+        template = self.assessment_template.get(
+            slide_idx,
+            {}
+        )
+
+        feedback = self.user_feedback or {}
+
+        prompt = f"""
+Generate assessment content for this slide.
+
+Slide ID: {slide_id}
+Slide Title: {title}
+Slide Description: {description}
+
+Detailed Content:
+{slide_draft}
+
+Assessment Template:
+{json.dumps(template, indent=2)}
+
+User Feedback:
+{json.dumps(feedback.get("assessment", {}), indent=2)}
+
+Overall Feedback:
+{json.dumps(feedback.get("overall", {}), indent=2)}
+
+Return ONLY one valid JSON object.
+
+IMPORTANT:
+- "slide_id" MUST be {slide_id}
+- "title" MUST be "{title}"
+- "assessment" MUST be an object
+- Put questions, activities, learning_objectives and
+  discussion_questions INSIDE "assessment".
+
+Use this structure:
+
+{{
+  "slide_id": {slide_id},
+  "title": "{title}",
+  "assessment": {{
+    "questions": [],
+    "activities": [],
+    "learning_objectives": [],
+    "discussion_questions": []
+  }}
+}}
+"""
+
+        teaching_assistant.reset_history()
+
+        print(
+            f"Generating assessment for slide: {title}..."
+        )
+
+        response, elapsed_time, token_usage = (
+            teaching_assistant.generate_response(
+                prompt=prompt,
+                stream=True,
+                save_to_history=False
+            )
+        )
+
+        self.time_assessment += elapsed_time
+        self.token_assessment += token_usage
+
+        try:
+            data = self._extract_json(response)
+
+            if not isinstance(data, dict):
+                raise ValueError(
+                    "Assessment response is not an object."
+                )
+
+            # Qwen can sometimes return the assessment fields at
+            # the top level instead of under "assessment".
+            nested = data.get("assessment")
+
+            if isinstance(nested, dict):
+                assessment = nested
+            else:
+                assessment = {
+                    "questions": data.get("questions", []),
+                    "activities": data.get("activities", []),
+                    "learning_objectives": data.get(
+                        "learning_objectives", []
+                    ),
+                    "discussion_questions": data.get(
+                        "discussion_questions", []
+                    )
+                }
+
+            def safe_list(value):
+                return value if isinstance(value, list) else []
+
+            normalized = {
+                "slide_id": slide_id,
+                "title": title,
+                "assessment": {
+                    "questions": safe_list(
+                        assessment.get("questions", [])
+                    ),
+                    "activities": safe_list(
+                        assessment.get("activities", [])
+                    ),
+                    "learning_objectives": safe_list(
+                        assessment.get("learning_objectives", [])
+                    ),
+                    "discussion_questions": safe_list(
+                        assessment.get("discussion_questions", [])
+                    )
+                }
+            }
+
+            # Normalize malformed question entries too.
+            normalized_questions = []
+
+            for q in normalized["assessment"]["questions"]:
+                if isinstance(q, dict):
+                    normalized_questions.append(q)
+                elif isinstance(q, str):
+                    normalized_questions.append({
+                        "type": "short_answer",
+                        "question": q
+                    })
+
+            normalized["assessment"]["questions"] = (
+                normalized_questions
+            )
+
+            self.assessment_content[slide_idx] = normalized
+
+            print(
+                f"Successfully generated assessment for slide: "
+                f"{title}"
+            )
+
+        except Exception as e:
+            print(
+                f"Error parsing assessment for slide "
+                f"{slide_id}: {e}"
+            )
+            print("Response:", response)
+
+            # Safe fallback. The course should continue rather
+            # than fail because one LLM assessment was malformed.
+            self.assessment_content[slide_idx] = {
+                "slide_id": slide_id,
+                "title": title,
+                "assessment": {
+                    "questions": [],
+                    "activities": [
+                        f"Practice exercise for {title}"
+                    ],
+                    "learning_objectives": [
+                        f"Understand the concepts presented in {title}"
+                    ],
+                    "discussion_questions": [
+                        f"Discuss the key ideas from {title}"
+                    ]
+                }
+            }
+
+    def _compile_latex_source(self) -> str:
+        """Compile all LaTeX frames into a complete source document"""
+        # Start with the prefix
+        prefix = self.latex_prefix if hasattr(self, 'latex_prefix') else ""
+        
+        # Collect all frames in order
+        frames = []
+        for i in range(len(self.slides_outline)):
+            if i in self.latex_dict:
+                for frame in self.latex_dict[i]["frames"]:
+                    frames.append(frame["full_frame"])
+        
+        # Add the suffix
+        suffix = self.latex_suffix if hasattr(self, 'latex_suffix') else "\n\\end{document}"
+        
+        # Use utility function to compile
+        return SlideUtils.compile_latex_document(prefix, frames, suffix)
+    
+    def _compile_slides_script(self) -> str:
+        """Compile slide scripts safely."""
+        script_md = f"# Slides Script: {self.name}\n\n"
+
+        for i in range(len(self.slides_outline)):
+            if i not in self.slides_script:
+                continue
+
+            script = self.slides_script[i]
+
+            if not isinstance(script, dict):
+                continue
+
+            slide_id = script.get("slide_id", i + 1)
+            title = script.get(
+                "title",
+                self.slides_outline[i].get(
+                    "title",
+                    f"Slide {i + 1}"
+                )
+            )
+
+            frame_count = script.get(
+                "frame_count",
+                1
+            )
+
+            script_text = script.get(
+                "script",
+                ""
+            )
+
+            script_md += (
+                f"## Section {slide_id}: {title}\n"
+            )
+
+            if frame_count > 1:
+                script_md += (
+                    f"*({frame_count} frames)*\n\n"
+                )
+            else:
+                script_md += "\n"
+
+            script_md += (
+                f"{script_text}\n\n"
+                "---\n\n"
+            )
+
+        return script_md
+
+    def _compile_assessment(self) -> str:
+        """Compile normalized assessments safely."""
+        assessment_md = (
+            f"# Assessment: {self.name}\n\n"
+        )
+
+        for i in range(len(self.slides_outline)):
+
+            if i not in self.assessment_content:
+                continue
+
+            raw = self.assessment_content[i]
+
+            if not isinstance(raw, dict):
+                continue
+
+            slide_id = raw.get(
+                "slide_id",
+                i + 1
+            )
+
+            title = raw.get(
+                "title",
+                self.slides_outline[i].get(
+                    "title",
+                    f"Slide {i + 1}"
+                )
+            )
+
+            nested = raw.get("assessment")
+
+            if isinstance(nested, dict):
+                assessment = nested
+            else:
+                assessment = raw
+
+            def safe_list(value):
+                return value if isinstance(value, list) else []
+
+            learning_objectives = safe_list(
+                assessment.get(
+                    "learning_objectives",
+                    []
+                )
+            )
+
+            questions = safe_list(
+                assessment.get(
+                    "questions",
+                    []
+                )
+            )
+
+            activities = safe_list(
+                assessment.get(
+                    "activities",
+                    []
+                )
+            )
+
+            discussion_questions = safe_list(
+                assessment.get(
+                    "discussion_questions",
+                    []
+                )
+            )
+
+            assessment_md += (
+                f"## Section {slide_id}: {title}\n\n"
+            )
+
+            if learning_objectives:
+                assessment_md += (
+                    "### Learning Objectives\n"
+                )
+
+                for obj in learning_objectives:
+                    assessment_md += (
+                        f"- {obj}\n"
+                    )
+
+                assessment_md += "\n"
+
+            if questions:
+                assessment_md += (
+                    "### Assessment Questions\n\n"
+                )
+
+                for idx, question in enumerate(
+                    questions,
+                    1
+                ):
+
+                    if not isinstance(
+                        question,
+                        dict
+                    ):
+                        assessment_md += (
+                            f"**Question {idx}:** "
+                            f"{question}\n\n"
+                        )
+                        continue
+
+                    assessment_md += (
+                        f"**Question {idx}:** "
+                        f"{question.get('question', '')}\n\n"
+                    )
+
+                    options = question.get(
+                        "options",
+                        []
+                    )
+
+                    if isinstance(options, list):
+                        for option in options:
+                            assessment_md += (
+                                f"  {option}\n"
+                            )
+
+                        assessment_md += "\n"
+
+                    correct = question.get(
+                        "correct_answer"
+                    )
+
+                    if correct:
+                        assessment_md += (
+                            f"**Correct Answer:** "
+                            f"{correct}\n"
+                        )
+
+                    explanation = question.get(
+                        "explanation"
+                    )
+
+                    if explanation:
+                        assessment_md += (
+                            f"**Explanation:** "
+                            f"{explanation}\n"
+                        )
+
+                    hint = question.get(
+                        "hint"
+                    )
+
+                    if hint:
+                        assessment_md += (
+                            f"**Hint:** {hint}\n"
+                        )
+
+                    assessment_md += "\n"
+
+            if activities:
+                assessment_md += "### Activities\n"
+
+                for activity in activities:
+                    assessment_md += (
+                        f"- {activity}\n"
+                    )
+
+                assessment_md += "\n"
+
+            if discussion_questions:
+                assessment_md += (
+                    "### Discussion Questions\n"
+                )
+
+                for question in discussion_questions:
+                    assessment_md += (
+                        f"- {question}\n"
+                    )
+
+                assessment_md += "\n"
+
+            assessment_md += "---\n\n"
+
+        return assessment_md
+

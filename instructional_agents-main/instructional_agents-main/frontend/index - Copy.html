@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Course Generator</title>
+
+    <link rel="stylesheet" href="styles.css">
+
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet">
+</head>
+
+<body>
+
+    <!-- ========================= -->
+    <!-- Welcome Page -->
+    <!-- ========================= -->
+
+    <section id="welcomePage">
+
+        <div class="welcomeOverlay"></div>
+
+        <div class="welcomeContent">
+
+            <h1>Welcome</h1>
+
+            <p>
+                Generate complete lecture slides, scripts and assessments
+                for your course using AI.
+            </p>
+
+            <button id="getStartedBtn">
+                Get Started
+            </button>
+
+        </div>
+
+    </section>
+
+
+
+    <!-- ========================= -->
+    <!-- Dashboard -->
+    <!-- ========================= -->
+
+    <section id="dashboard" class="hidden">
+
+        <header class="pageHeader">
+
+            <h2>AI Course Generator</h2>
+
+            <p>Select a generation mode</p>
+
+        </header>
+
+
+
+        <!-- ========================= -->
+        <!-- Mode Cards -->
+        <!-- ========================= -->
+
+        <div class="modeContainer">
+
+            <div class="modeCard active" data-mode="autonomous">
+
+                <h3>Autonomous</h3>
+
+                <p>
+                    Generate a complete course automatically.
+                </p>
+
+            </div>
+
+            <div class="modeCard" data-mode="catalog">
+
+                <h3>Catalog</h3>
+
+                <p>
+                    Generate a course using your course requirements.
+                </p>
+
+            </div>
+
+            <div class="modeCard" data-mode="copilot">
+
+                <h3>Copilot</h3>
+
+                <p>
+                   Guide the AI with your teaching preferences. 
+                </p>
+            </div>
+
+        </div>
+
+
+
+        <!-- ========================= -->
+        <!-- Form -->
+        <!-- ========================= -->
+
+        <div class="formContainer">
+
+            <form id="generatorForm">
+
+                <div class="inputGroup">
+
+                    <label for="courseName">
+                        Course Name
+                    </label>
+
+                    <input
+                        type="text"
+                        id="courseName"
+                        placeholder="Enter course name"
+                        required>
+
+                </div>
+
+
+
+                <div class="inputGroup">
+
+                    <label for="modelName">
+                        Local AI Model
+                    </label>
+
+                    <select id="modelName">
+
+                        <option value="qwen3:4b" selected>
+                            Qwen3 4B (Local)
+                        </option>
+
+                    </select>
+
+                </div>
+
+
+
+                <div
+    class="modeConfig hidden"
+    id="catalogConfigGroup">
+
+    <h3>Course Catalog</h3>
+
+    <p class="configHelp">
+        Provide your course requirements. You do not need to
+        create or upload a JSON file.
+    </p>
+
+    <div class="inputGroup">
+
+        <label for="catalogCourseStructure">
+            Course Structure
+        </label>
+
+        <textarea
+            id="catalogCourseStructure"
+            placeholder="Example: 12-week course covering graph algorithms and practical applications."
+            rows="3"></textarea>
+
+    </div>
+
+    <div class="inputGroup">
+
+        <label for="catalogInstitutionalRequirements">
+            Institutional Requirements
+        </label>
+
+        <textarea
+            id="catalogInstitutionalRequirements"
+            placeholder="Example: B.Tech Computer Science course following university syllabus requirements."
+            rows="3"></textarea>
+
+    </div>
+
+    <div class="inputGroup">
+
+        <label for="catalogTeachingConstraints">
+            Teaching Constraints
+        </label>
+
+        <textarea
+            id="catalogTeachingConstraints"
+            placeholder="Example: 2 lectures per week, limited lab resources."
+            rows="3"></textarea>
+
+    </div>
+
+    <div class="inputGroup">
+
+        <label for="catalogStudentProfile">
+            Student Profile
+        </label>
+
+        <textarea
+            id="catalogStudentProfile"
+            placeholder="Example: Undergraduate engineering students with basic programming knowledge."
+            rows="3"></textarea>
+
+    </div>
+
+    <div class="inputGroup">
+
+        <label for="catalogPriorFeedback">
+            Prior Feedback
+        </label>
+
+        <textarea
+            id="catalogPriorFeedback"
+            placeholder="Example: Students need more practical examples."
+            rows="3"></textarea>
+
+    </div>
+
+    <div class="inputGroup">
+
+        <label for="catalogInstructorPreferences">
+            Instructor Preferences
+        </label>
+
+        <textarea
+            id="catalogInstructorPreferences"
+            placeholder="Example: Prefer simple explanations, diagrams and real-world examples."
+            rows="3"></textarea>
+
+    </div>
+
+    <div class="inputGroup">
+
+        <label for="catalogAssessmentDesign">
+            Assessment Design
+        </label>
+
+        <textarea
+            id="catalogAssessmentDesign"
+            placeholder="Example: Include MCQs, coding exercises and application-based questions."
+            rows="3"></textarea>
+
+    </div>
+
+    <div class="inputGroup">
+
+        <label for="catalogMaxSlides">
+            Maximum Slides per Chapter
+        </label>
+
+        <input
+            type="number"
+            id="catalogMaxSlides"
+            min="5"
+            max="100"
+            value="30">
+
+    </div>
+
+</div>
+
+       <div
+    class="modeConfig hidden"
+    id="copilotConfigGroup">
+
+    <h3>Copilot Preferences</h3>
+
+    <p class="configHelp">
+        Tell the AI how you want your course to be designed.
+        You can leave any field empty.
+    </p>
+
+    <div class="inputGroup">
+
+        <label for="copilotLearningObjectives">
+            Learning Objectives
+        </label>
+
+        <textarea
+            id="copilotLearningObjectives"
+            placeholder="What should students be able to understand or do after completing the course?"
+            rows="3"></textarea>
+
+    </div>
+
+    <div class="inputGroup">
+
+        <label for="copilotSyllabus">
+            Syllabus Preferences
+        </label>
+
+        <textarea
+            id="copilotSyllabus"
+            placeholder="Topics you want included, emphasized or avoided."
+            rows="3"></textarea>
+
+    </div>
+
+    <div class="inputGroup">
+
+        <label for="copilotSlides">
+            Slide Preferences
+        </label>
+
+        <textarea
+            id="copilotSlides"
+            placeholder="Example: Keep slides concise, visual and include practical examples."
+            rows="3"></textarea>
+
+    </div>
+
+    <div class="inputGroup">
+
+        <label for="copilotScript">
+            Script Preferences
+        </label>
+
+        <textarea
+            id="copilotScript"
+            placeholder="Example: Use simple presenter-friendly language and explain concepts step by step."
+            rows="3"></textarea>
+
+    </div>
+
+    <div class="inputGroup">
+
+        <label for="copilotAssessment">
+            Assessment Preferences
+        </label>
+
+        <textarea
+            id="copilotAssessment"
+            placeholder="Example: Include MCQs, practical exercises and application-based questions."
+            rows="3"></textarea>
+
+    </div>
+
+    <div class="inputGroup">
+
+        <label for="copilotOverall">
+            Overall Instructions
+        </label>
+
+        <textarea
+            id="copilotOverall"
+            placeholder="Any other instructions for the AI?"
+            rows="3"></textarea>
+
+    </div>
+
+</div>
+
+                
+
+
+
+                <div class="checkboxRow">
+
+                    <label>
+
+                        <input
+                            type="checkbox"
+                            id="generatePptx">
+
+                        Generate PPTX
+
+                    </label>
+
+                </div>
+
+
+
+                <button
+                    id="generateBtn"
+                    type="submit">
+
+                    Generate
+
+                </button>
+
+            </form>
+
+        </div>
+
+
+
+        <!-- ========================= -->
+        <!-- Progress -->
+        <!-- ========================= -->
+
+        <section
+            id="progressSection"
+            class="hidden">
+
+            <h3>Progress</h3>
+
+            <div class="progressBar">
+
+                <div id="progressFill"></div>
+
+            </div>
+
+            <div id="progressPercent">
+                0%
+            </div>
+
+            <div id="currentStage">
+                Waiting...
+            </div>
+
+        </section>
+
+
+
+        <!-- ========================= -->
+        <!-- Live Logs -->
+        <!-- ========================= -->
+
+        <section
+            id="logsSection"
+            class="hidden">
+
+            <h3>Live Logs</h3>
+
+            <div id="logsContainer"></div>
+
+        </section>
+
+
+
+        <!-- ========================= -->
+        <!-- Results -->
+        <!-- ========================= -->
+
+        <section
+            id="resultsSection"
+            class="hidden">
+
+            <h3>Generated Chapters</h3>
+
+            <div id="chapterResults"></div>
+
+        </section>
+
+
+
+        <!-- ========================= -->
+        <!-- Completion -->
+        <!-- ========================= -->
+
+        <section
+            id="completionSection"
+            class="hidden">
+
+            <button id="generateAnotherBtn">
+                Generate Another Course
+            </button>
+
+        </section>
+
+    </section>
+
+    <script src="app.js"></script>
+
+</body>
+
+</html>
